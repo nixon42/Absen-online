@@ -4,50 +4,48 @@ import re
 import json
 import os
 import datetime
+import logging
+import traceback
+import threading
+
+import teleBot
+import db
+import var
+
+logging.basicConfig(
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s', level=logging.INFO
+)
+
+logger = logging.getLogger(__name__)
+
+process = []
 
 
 def payload(payload):
     dataDict = {}
     pairData = str(payload).split('&')
-    for data in pairData:
-        data = data.split('=')
-        dataDict[data[0]] = data[1]
+    for _data in pairData:
+        _data = _data.split('=')
+        dataDict[_data[0]] = _data[1]
     return dataDict
 
 
 def req(url, payload):
-    data = ''
+    dataReq = ''
     for param in payload:
-        data += f'&{param}={payload[param]}'
-    fullUrl = f'{url}?{data}'
+        dataReq += f'&{param}={payload[param]}'
+    fullUrl = f'{url}?{dataReq}'
     while True:
         try:
+            logger.debug(fullUrl)
             res = request.urlopen(fullUrl)
             if re.search('Tanggapan Anda telah direkam.', str(res.read())):
                 return (True, '')
             return (False, fullUrl)
         except Exception as e:
-            print('Terjadi Error Saat menghubungi Server')
-            print('Error : ', e.__str__())
-            print('')
-            print('Mencoba kembali dalam 5 detik ', end='', flush=True)
-            for _ in range(5):
-                print('.', flush=True, end='')
-            print('')
-
-
-def countdown(sec):
-    print('')
-    while sec >= 0:
-        # print(sec)
-        minute, second = divmod(sec, 60)
-        hour, minute = divmod(minute, 60)
-
-        count = f"Next {hour}:{minute}:{second}"
-        print(count, end='\r', flush=True)
-        sec -= 1
-        time.sleep(1)
-    print('')
+            logger.error('Error Saat menghubungi Server')
+            logger.error('Error : ', exc_info=e.__str__())
+            logger.warn('Mencoba kembali dalam 5 detik ', end='', flush=True)
 
 
 def getGMT7():
@@ -57,55 +55,125 @@ def getGMT7():
     return gmt7
 
 
-def nextTime(time, gmt=datetime.datetime.now()):
+def pauseUntil(time, gmt, long):
+    # print(day)
+    nextDay = datetime.timedelta(days=long)
+
+    _gmt = gmt + nextDay
+    _gmt = _gmt.replace(hour=time[0], minute=time[1], second=0, microsecond=0)
+    return _gmt
+
+
+def nextTime(time, gmt):
     nextDay = datetime.timedelta(days=1)
 
     _gmt = gmt + nextDay
     _gmt = _gmt.replace(hour=time[0], minute=time[1], second=0, microsecond=0)
-    different = _gmt - gmt
-    # print('Next Time : ', _gmt)
-    # print('Cur time : ', gmt)
-    # print('Diff : ', different)
-    countdown(different.seconds)
+    return _gmt.isoformat()
+
+
+def updatePayload(payload: dict, gmt: datetime.datetime):
+    year = gmt.year
+    month = gmt.month
+    day = gmt.day
+
+    for key in payload:
+        if re.search('_year', key):
+            payload[key] = year
+        elif re.search('_month', key):
+            payload[key] = month
+        elif re.search('_day', key):
+            payload[key] = day
+
+    return payload
+
+
+def workerMain(id):
+    logger.info(msg="Working for user " + id.__str__())
+    process.append(id)
+    date = getGMT7()
+    curDate = date.strftime(
+        " %H:%M:%S %a, %d/%m/%Y")
+    day = date.strftime(
+        "%a")
+
+    data = db.getData(id)
+    time = [int(x) for x in data['waktu'].split('.')]
+    libur = data['libur'].split(',')
+
+    bot.sendMsg(data['chatId'], var.temMsg['log'])
+    bot.sendMsg(data['chatId'], f'Hari ini : {curDate}')
+
+    logger.debug(data)
+    if data['pause'] != '' and data['pause'] != None:
+        skip = datetime.datetime.fromisoformat(data['pause'])
+        if skip >= date:
+            skipStr = skip.strftime('%H:%M:%S %a, %d/%m/%Y')
+            bot.sendMsg(data['chatId'], 'Skip Sampai %s' % skipStr)
+            trig = nextTime(time, date)
+
+            db.addConfig(id, 'trigger', trig)
+            return
+        else:
+            db.addConfig(id, 'trigger', '')
+
+    if libur.__contains__(day):
+        bot.sendMsg(data['chatId'], 'Hari ini libur,')
+        trig = nextTime(time, date)
+        db.addConfig(id, 'trigger', trig)
+        return
+
+    bot.sendMsg(data['chatId'], 'Mencoba Absen ..')
+    reqData = payload(data['payload'])
+    reqData = updatePayload(reqData, date)
+
+    login, url = req(data['url'], reqData)
+    if login:
+        bot.sendMsg(data['chatId'], 'Absen Berhasil !')
+        trig = nextTime(time, date)
+        db.addConfig(id, 'trigger', trig)
+    else:
+        bot.sendMsg(data['chatId'], 'Absen Gagal :')
+        bot.sendMsg(data['chatId'], 'Full URL : ' + url)
+        bot.sendMsg(data['chatId'], 'Layanan dihentikan !')
+        db.addConfig(id, 'trigger', '')
+    process.remove(id)
+
+
+def workerPause(id, long: int):
+    date = getGMT7()
+    data = db.getData(id)
+    time = [int(x) for x in data['waktu']]
+    pause = pauseUntil(time, date, long)
+    pauseIsoFormat = pause.isoformat()
+
+    pauseStr = pause.strftime(
+        " %H:%M:%S %a, %d/%m/%Y")
+    db.addConfig(id, 'pause', pauseIsoFormat)
+    bot.sendMsg(data['chatId'], 'Skip Sampai ' + pauseStr)
+
+
+def workerLoop():
+    """
+    docstring
+    """
+    while True:
+        date = getGMT7()
+        triggers = db.checkTrig()
+
+        for trigger in triggers:
+            trigDate = datetime.datetime.fromisoformat(trigger)
+            if trigDate <= date and not process.__contains__(triggers[trigger]):
+                # print('here : ', triggers[trigger])
+                threading.Thread(
+                    target=workerMain, args=[triggers[trigger]]).start()
+        time.sleep(3)
 
 
 if __name__ == "__main__":
-    print('Script Auto Login ..')
-    print('')
-    while True:
-        date = getGMT7()
-        timeTup = date.timetuple()
-        curDate = time.strftime(
-            " %H:%M:%S %a, %d/%m/%Y", timeTup)
-        day = time.strftime('%a', timeTup)
+    threading.Thread(target=workerLoop).start()
+    # threading.Thread(target=workerThread).start()
+    bot = teleBot.TeleBot(
+        '1047213602:AAG_J7z8vV-TSzObzKiRhHQEBVUSA3Uc3Gw', workerMain, workerPause)
 
-        print(f'Hari ini : {curDate}')
-        path = os.path.join(os.path.abspath('.'), 'data.json')
-        dataDict = json.load(open(path))
-
-        if dataDict['libur'].__contains__(day):
-            print('Hari ini libur,')
-            nextTime(dataDict['time'], date)
-            continue
-
-        if dataDict['lastLogin'] != '':
-            lastDate = datetime.datetime.fromisoformat(dataDict['lastLogin'])
-            if lastDate <= curDate:
-                print('Hari ini sudah Login')
-                nextTime(dataDict['time'], date)
-
-        print('Mencoba Login ..')
-        data = payload(dataDict['payload'])
-        date = time.localtime()[:3]
-        data['entry.1587417115_year'], data['entry.1587417115_month'], data['entry.1587417115_day'] = date
-
-        login, url = req(dataDict['url'], data)
-        if login:
-            print('Login Berhasil !')
-            dataDict['lastLogin'] = getGMT7().isoformat()
-            json.dump(dataDict, open(path, 'w'))
-            nextTime(dataDict['time'], date)
-        else:
-            print('Login Gagal :')
-            print('Full URL : ' + url)
-            time.sleep(3600)
+    bot.run()
