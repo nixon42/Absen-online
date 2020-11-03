@@ -39,7 +39,7 @@ def req(url, payload):
         try:
             logger.debug(fullUrl)
             res = request.urlopen(fullUrl)
-            if re.search('Tanggapan Anda telah direkam.', str(res.read())):
+            if re.search('Kirim tanggapan lain', str(res.read())):
                 return (True, '')
             return (False, fullUrl)
         except Exception as e:
