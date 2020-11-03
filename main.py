@@ -43,7 +43,7 @@ def req(url, payload):
             content = str(res.read())
             if re.search('Kirim tanggapan lain', content):
                 return (True, '')
-            return (False, fullUrl)
+            return (False, content)
         except Exception as e:
             logger.error('Error Saat menghubungi Server')
             logger.error('Error : ', exc_info=e.__str__())
