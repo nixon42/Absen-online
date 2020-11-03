@@ -41,10 +41,7 @@ def req(url, payload):
             res = request.urlopen(fullUrl)
             content = str(res.read())
             
-            r = re.compile('<div class="freebirdFormviewerViewResponseLinksContainer">(.*?)</div>')
-            print(r.search(content).groups()[0])
-            
-            if re.search('Kirim tanggapan lain', content):
+            if re.search('Submit another response', content):
                 return (True, '')
             return (False, fullUrl)
         except Exception as e:
