@@ -39,6 +39,7 @@ def req(url, payload):
         try:
             logger.debug(fullUrl)
             res = request.urlopen(fullUrl)
+            time.sleep(1)
             content = str(res.read())
             if re.search('Kirim tanggapan lain', content):
                 return (True, '')
