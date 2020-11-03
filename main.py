@@ -40,6 +40,10 @@ def req(url, payload):
             logger.debug(fullUrl)
             res = request.urlopen(fullUrl)
             content = str(res.read())
+            
+            r = re.compile('<div class="freebirdFormviewerViewResponseLinksContainer">(.*?)</div>')
+            print(r.search(content).groups()[0])
+            
             if re.search('Kirim tanggapan lain', content):
                 return (True, '')
             return (False, fullUrl)
