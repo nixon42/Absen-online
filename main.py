@@ -176,6 +176,6 @@ if __name__ == "__main__":
     threading.Thread(target=workerLoop).start()
     # threading.Thread(target=workerThread).start()
     bot = teleBot.TeleBot(
-        '1047213602:AAG_J7z8vV-TSzObzKiRhHQEBVUSA3Uc3Gw', workerMain, workerPause)
+        '===================token goes here ===========', workerMain, workerPause)
 
     bot.run()
